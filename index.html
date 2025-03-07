@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extrair PDF para TXT</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <style>
+        body {
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            background-color: white;
+        }
+        .logo {
+            margin-top: 20px;
+            margin-bottom: 40px;
+        }
+        .logo img {
+            max-width: 150px;
+        }
+        .container {
+            text-align: center;
+            background-color: #f4f4f4;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+            width: 100%;
+            max-width: 500px;
+        }
+        button {
+            margin-top: 10px;
+            padding: 10px 20px;
+            font-size: 16px;
+            cursor: pointer;
+            background-color: #fc0404;
+            color: white;
+            border: none;
+            border-radius: 5px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+        }
+        input[type="file"] {
+            margin-top: 20px;
+        }
+        .button-container {
+            display: flex;
+            gap: 20px;
+            justify-content: center;
+            margin-top: 20px;
+        }
+        .footer {
+        text-align: center;
+        padding: 20px;
+        background-color: rgba(244, 244, 244, 0.7); /* Cor de fundo com transparência */
+        position: fixed;
+        bottom: 0;
+        width: 100%;
+        font-size: 14px;
+        color: #333;
+        backdrop-filter: blur(5px); /* Opcional, deixa o fundo desfocado */
+    }
+    </style>
+</head>
+<body>
+    <!-- Logo fora do container -->
+    <div class="logo">
+        <img src="imagens/logo.png" alt="Logo da Empresa">
+
+    </div>
+
+    <div class="container">
+        <!-- Caixa de upload -->
+        <input type="file" id="fileInput" accept=".pdf">
+
+        <!-- Botões Transformar e Baixar -->
+        <div class="button-container">
+            <button id="transformButton" disabled>Transformar</button>
+            <button id="downloadButton" disabled>Baixar TXT</button>
+        </div>
+    </div>
+
+    <script>
+        let fileBuffer = null;
+        let extractedText = "";
+
+        document.getElementById('fileInput').addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    fileBuffer = new Uint8Array(e.target.result);
+                    document.getElementById('transformButton').disabled = false;
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                document.getElementById('transformButton').disabled = true;
+            }
+        });
+
+        document.getElementById('transformButton').addEventListener('click', async function() {
+            if (!fileBuffer) return;
+
+            const loadingTask = pdfjsLib.getDocument({ data: fileBuffer });
+            const pdf = await loadingTask.promise;
+            extractedText = "";
+
+            for (let i = 1; i <= pdf.numPages; i++) {
+                const page = await pdf.getPage(i);
+                const text = await page.getTextContent();
+
+                let lines = [];
+                let currentLine = "";
+                let lastY = null;
+
+                text.items.forEach(item => {
+                    let y = item.transform[5];
+
+                    if (lastY === null || Math.abs(y - lastY) < 5) {
+                        currentLine += item.str + " ";
+                    } else {
+                        lines.push(currentLine.trim());
+                        currentLine = item.str + " ";
+                    }
+
+                    lastY = y;
+                });
+
+                if (currentLine.trim() !== "") {
+                    lines.push(currentLine.trim());
+                }
+
+                extractedText += lines.join("\n") + "\n";
+            }
+
+            // Ajuste no filtro de cabeçalhos
+            const headerPatterns = [
+                /BANCO DO ESTADO DO RIO GRANDE DO SUL, S\.A\..*/gi,  // Banco
+                /BRR - CONTAS A PAGAR.*/gi,                          // Contas a pagar
+                /BRRR471 - TITULOS AGENDADOS.*/gi,                   // Títulos agendados
+                /UAS - UNIDADE DE ATENDIMENTO.*/gi,                  // Unidade de atendimento
+                /DATA\s*CODIGO\s*DE\s*BARRAS\s*VALOR\s*INFORMADO\s*VALOR\s*LIQUIDACAO.*/gi, // Cabeçalho com muitos espaços
+                /PAGAMENTO\s*NO\s*ARQUIVO\s*REMESSA\s*CONFORME\s*DDA.*/gi,  // DDA
+                /.BRR*/gi // Padrão para identificar qualquer linha que comece com "BRR"
+            ];
+
+             // Remover todas as linhas que contêm "BRR"
+            extractedText = extractedText.split("\n").filter(line => !/.BRR.*/gi.test(line)).join("\n");
+
+            headerPatterns.forEach(pattern => {
+                extractedText = extractedText.replace(pattern, "");
+            });
+
+            // Remover linhas vazias e traços longos
+            extractedText = extractedText.replace(/-{3,}/g, "").trim();
+            extractedText = extractedText.replace(/^\s*[\r\n]/gm, "");
+
+            const lines = extractedText.split("\n").filter(line => {
+                return !/DATA;CODIGO DE BARRAS;VALOR INFORMADO;VALOR LIQUIDACAO/i.test(line) &&
+                    !/PAGAMENTO;NO ARQUIVO REMESSA;CONFORME DDA/i.test(line) &&
+                    !/^\.\s*$/g.test(line) &&    // Remover linhas com apenas ponto
+                    !/^;\s*$/g.test(line) &&     // Remover linhas com apenas ponto e vírgula
+                    line.trim() !== "";          // Remover linhas vazias
+            });
+
+            extractedText = lines.join("\n");
+              // Ajustes no texto extraído
+              extractedText = extractedText.replace(/\//g, '.');  // Substitui todas as ocorrências de "/" por "."
+
+            // Ajustar formatação das colunas e adicionar ponto e vírgula ao final de cada linha
+            extractedText = extractedText.split("\n").map(line => {
+                return line.trim().replace(/\s{2,}/g, ";") + ";"; // Adiciona ponto e vírgula ao final
+            }).join("\n");
+
+            document.getElementById('downloadButton').disabled = false;
+        });
+
+        document.getElementById('downloadButton').addEventListener('click', function() {
+            if (!extractedText) return;
+
+            const blob = new Blob([extractedText], { type: "text/plain" });
+            const link = document.createElement("a");
+            link.href = URL.createObjectURL(blob);
+            link.download = "dados_extraidos.txt";
+            link.click();
+            URL.revokeObjectURL(link.href);
+        });
+    </script>
+
+<footer>
+    <p>&copy; 2025 PASTORINI. Todos os direitos reservados.</p>
+</footer>
+</body>
+</html>
